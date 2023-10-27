@@ -33,25 +33,45 @@ async def optimize(request: CutRequest):
 
 # Votre code existant ici (fonctions optimize_cutting, optimize_bar, etc.)
 
+
 def optimize_bar(tasseaux, bar_length):
     solver = pywraplp.Solver.CreateSolver('SCIP')
     if not solver:
         return None, tasseaux
 
+    # Triez les tasseaux dans l'ordre décroissant de longueur
+    tasseaux = sorted(tasseaux, key=lambda x: x[0], reverse=True)
+    
     cuts = []
-    remaining_length = bar_length
 
-    while remaining_length > 0 and any(quantite > 0 for _, quantite in tasseaux):
-        for i, (longueur, quantite) in enumerate(tasseaux):
-            if longueur <= remaining_length and quantite > 0:
-                cuts.append(longueur)
-                tasseaux[i] = (longueur, quantite - 1)
-                remaining_length -= longueur
-                break
-        else:
+    # Coupez le plus grand tasseau possible qu'il reste à découper
+    for i, (longueur, quantite) in enumerate(tasseaux):
+        if longueur <= bar_length and quantite > 0:
+            cuts.append(longueur)
+            tasseaux[i] = (longueur, quantite - 1)
+            bar_length -= longueur
             break
 
-    return cuts, tasseaux
+    # Variables
+    x = []  # x[i] sera égal au nombre de tasseaux de longueur tasseaux[i][0] utilisés
+    for _, quantite in tasseaux:
+        x.append(solver.IntVar(0, quantite, ""))
+    
+    # Contrainte : la somme des longueurs des tasseaux utilisés ne doit pas dépasser bar_length
+    constraint_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux)))
+    solver.Add(constraint_expr <= bar_length)
+    
+    # Objectif : maximiser la somme des longueurs des tasseaux utilisés
+    solver.Maximize(constraint_expr)
+    
+    status = solver.Solve()
+    
+    if status == pywraplp.Solver.OPTIMAL:
+        for i in range(len(tasseaux)):
+            cuts.extend([tasseaux[i][0]] * int(x[i].solution_value()))
+            tasseaux[i] = (tasseaux[i][0], tasseaux[i][1] - int(x[i].solution_value()))
+    
+        return cuts, tasseaux
 
 def optimize_cutting(tasseaux, bar_length):
     # Tri décroissant
