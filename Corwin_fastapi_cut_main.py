@@ -55,14 +55,6 @@ def optimize_bar(tasseaux, bar_length):
     
     cuts = []
 
-    # Coupez le plus grand tasseau possible qu'il reste à découper
-    for i, (longueur, quantite) in enumerate(tasseaux):
-        if longueur <= bar_length and quantite > 0:
-            cuts.append(longueur)
-            tasseaux[i] = (longueur, quantite - 1)
-            bar_length -= longueur
-            break
-
     # Variables
     x = []  # x[i] sera égal au nombre de tasseaux de longueur tasseaux[i][0] utilisés
     for _, quantite in tasseaux:
@@ -72,8 +64,8 @@ def optimize_bar(tasseaux, bar_length):
     constraint_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux)))
     solver.Add(constraint_expr <= bar_length)
 
-    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs
-    objective_expr = sum(tasseaux[i][0] * tasseaux[i][0] * x[i] for i in range(len(tasseaux))) # multiplie par tasseaux[i][0] pour le poids
+    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs, dit autrement on applique une pénalité à chaque tasseau
+    objective_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux))) * bar_length - sum(x[i] for i in range(len(tasseaux)))
     solver.Maximize(objective_expr)
         
     status = solver.Solve()
@@ -109,7 +101,11 @@ def format_and_count_cuts(cuts_per_bar):
         # Formater la coupe (regrouper les longueurs identiques)
         formatted_cut = ', '.join(f"{length} x {count}" if count > 1 else f"{length}" for length, count in counts.items())
         formatted_cuts[formatted_cut] = formatted_cuts.get(formatted_cut, 0) + 1
-    return formatted_cuts
+
+    # Trier les résultats par le nombre d'utilisation décroissante
+    sorted_formatted_cuts = dict(sorted(formatted_cuts.items(), key=lambda item: item[1], reverse=True))
+
+    return sorted_formatted_cuts
 
 
 if __name__ == "__main__":
