@@ -1,12 +1,23 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Tuple
-
+from fastapi.middleware.cors import CORSMiddleware
 from ortools.linear_solver import pywraplp
 from collections import Counter
 # Importez les autres dépendances nécessaires
 
 app = FastAPI()
+
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # C'est pour le debugging. En production, remplacez "*" par votre domaine frontend.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class CutRequest(BaseModel):
     tasseaux: List[Tuple[int, int]]
@@ -60,10 +71,11 @@ def optimize_bar(tasseaux, bar_length):
     # Contrainte : la somme des longueurs des tasseaux utilisés ne doit pas dépasser bar_length
     constraint_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux)))
     solver.Add(constraint_expr <= bar_length)
-    
-    # Objectif : maximiser la somme des longueurs des tasseaux utilisés
-    solver.Maximize(constraint_expr)
-    
+
+    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs
+    objective_expr = sum(tasseaux[i][0] * tasseaux[i][0] * x[i] for i in range(len(tasseaux))) # multiplie par tasseaux[i][0] pour le poids
+    solver.Maximize(objective_expr)
+        
     status = solver.Solve()
     
     if status == pywraplp.Solver.OPTIMAL:
