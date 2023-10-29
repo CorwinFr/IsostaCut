@@ -13,9 +13,9 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # C'est pour le debugging. En production, remplacez "*" par votre domaine frontend.
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -61,21 +61,28 @@ def optimize_bar(tasseaux, bar_length):
     cuts = []
     
     # Toujours couper le plus grand tasseau autant de fois que possible, tout en s'assurant qu'il reste un autre tasseau découpable
-    while tasseaux:
-        max_tasseau_longueur, max_tasseau_quantite = tasseaux[0]
-        if max_tasseau_longueur <= bar_length and max_tasseau_quantite > 0:
-            # Vérifiez si un autre tasseau peut être coupé à partir de la chute restante
-            remaining_bar_length = bar_length - max_tasseau_longueur
-            if any(longueur <= remaining_bar_length for longueur, quantite in tasseaux if quantite > 0):
-                cuts.append(max_tasseau_longueur)
-                bar_length = remaining_bar_length
-                tasseaux[0] = (max_tasseau_longueur, max_tasseau_quantite - 1)
-            else:
-                # Si le plus grand tasseau ne peut pas être coupé, arrêtez la boucle
-                break
+while tasseaux:
+    # Filtrer les tasseaux avec quantité > 0 et triez-les dans l'ordre décroissant de longueur à chaque itération
+    tasseaux = sorted([t for t in tasseaux if t[1] > 0], key=lambda x: x[0], reverse=True)
+
+    if not tasseaux:
+        break
+
+    max_tasseau_longueur, max_tasseau_quantite = tasseaux[0]
+    if max_tasseau_longueur <= bar_length:
+        # Vérifiez si un autre tasseau avec quantité > 0 peut être coupé à partir de la chute restante
+        remaining_bar_length = bar_length - max_tasseau_longueur
+        if any(longueur <= remaining_bar_length and quantite > 0 for longueur, quantite in tasseaux):
+            cuts.append(max_tasseau_longueur)
+            bar_length = remaining_bar_length
+            # Mise à jour de la quantité pour le tasseau courant
+            tasseaux[0] = (max_tasseau_longueur, max_tasseau_quantite - 1)
         else:
-            # Si le plus grand tasseau est trop long pour la barre, arrêtez la boucle
+            # Si le plus grand tasseau ne peut pas être coupé, arrêtez la boucle
             break
+    else:
+        # Si le plus grand tasseau est trop long pour la barre, arrêtez la boucle
+        break
 
     # Variables
     x = []  # x[i] sera égal au nombre de tasseaux de longueur tasseaux[i][0] utilisés
