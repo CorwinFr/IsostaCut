@@ -29,13 +29,18 @@ async def optimize(request: CutRequest):
     # Reste du code...
 
     try:
-        cuts = optimize_cutting(request.tasseaux, request.bar_length)
+        cuts, total_chute, total_tasseaux_decoupes = optimize_cutting(request.tasseaux, request.bar_length)
         cuts_count = format_and_count_cuts(cuts)
         total_bars = sum(cuts_count.values())
 
-        print("Retour de la fonction optimize:", {"cuts": cuts_count, "total_bars": total_bars})
-        
-        return {"cuts": cuts_count, "total_bars": total_bars}
+        # ... votre code existant ...
+
+        return {
+            "cuts": cuts_count, 
+            "total_bars": total_bars, 
+            "total_chute": total_chute, 
+            "total_tasseaux_decoupes": total_tasseaux_decoupes
+        }
 
     except Exception as e:
         print("Erreur lors de l'optimisation:", e)
@@ -54,6 +59,23 @@ def optimize_bar(tasseaux, bar_length):
     tasseaux = sorted(tasseaux, key=lambda x: x[0], reverse=True)
     
     cuts = []
+    
+    # Toujours couper le plus grand tasseau autant de fois que possible, tout en s'assurant qu'il reste un autre tasseau découpable
+    while tasseaux:
+        max_tasseau_longueur, max_tasseau_quantite = tasseaux[0]
+        if max_tasseau_longueur <= bar_length and max_tasseau_quantite > 0:
+            # Vérifiez si un autre tasseau peut être coupé à partir de la chute restante
+            remaining_bar_length = bar_length - max_tasseau_longueur
+            if any(longueur <= remaining_bar_length for longueur, quantite in tasseaux if quantite > 0):
+                cuts.append(max_tasseau_longueur)
+                bar_length = remaining_bar_length
+                tasseaux[0] = (max_tasseau_longueur, max_tasseau_quantite - 1)
+            else:
+                # Si le plus grand tasseau ne peut pas être coupé, arrêtez la boucle
+                break
+        else:
+            # Si le plus grand tasseau est trop long pour la barre, arrêtez la boucle
+            break
 
     # Variables
     x = []  # x[i] sera égal au nombre de tasseaux de longueur tasseaux[i][0] utilisés
@@ -64,8 +86,9 @@ def optimize_bar(tasseaux, bar_length):
     constraint_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux)))
     solver.Add(constraint_expr <= bar_length)
 
-    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs, dit autrement on applique une pénalité à chaque tasseau
-    objective_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux))) * bar_length - sum(x[i] for i in range(len(tasseaux)))
+    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs
+    penalty_per_cut = 0.1  # une petite valeur, mais assez pour faire une différence
+    objective_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux))) - penalty_per_cut * sum(x[i] for i in range(len(tasseaux)))
     solver.Maximize(objective_expr)
         
     status = solver.Solve()
@@ -77,20 +100,25 @@ def optimize_bar(tasseaux, bar_length):
     
         return cuts, tasseaux
 
+
 def optimize_cutting(tasseaux, bar_length):
-    # Tri décroissant
     tasseaux_sorted = sorted(tasseaux, reverse=True)
     cuts_per_bar = []
+    total_chute = 0  # Total des chutes perdues
+    total_tasseaux_decoupes = 0  # Nombre total de tasseaux découpés
 
     while any(quantite > 0 for _, quantite in tasseaux_sorted):
         cuts, new_tasseaux = optimize_bar(tasseaux_sorted, bar_length)
         if cuts:
             cuts_per_bar.append(cuts)
             tasseaux_sorted = new_tasseaux
+            total_chute += bar_length - sum(cuts)  # Ajouter la chute de cette barre au total
+            total_tasseaux_decoupes += len(cuts)  # Compter les tasseaux découpés pour cette barre
         else:
             break
 
-    return cuts_per_bar
+    return cuts_per_bar, total_chute, total_tasseaux_decoupes
+
 
 
 def format_and_count_cuts(cuts_per_bar):
