@@ -47,6 +47,9 @@ async def optimize(request: CutRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Votre code existant ici (fonctions optimize_cutting, optimize_bar, etc.)
+
+
 def optimize_bar(tasseaux, bar_length):
     solver = pywraplp.Solver.CreateSolver('SCIP')
     if not solver:
@@ -54,57 +57,66 @@ def optimize_bar(tasseaux, bar_length):
 
     # Triez les tasseaux dans l'ordre décroissant de longueur
     tasseaux = sorted(tasseaux, key=lambda x: x[0], reverse=True)
+    
+    cuts = []
+    
+    # Toujours couper le plus grand tasseau autant de fois que possible, tout en s'assurant qu'il reste un autre tasseau découpable
+    first_iteration = True
 
-    # Trouvez l'indice du plus grand tasseau ayant une quantité > 0
-    idx_max = next((i for i, (length, qty) in enumerate(tasseaux) if qty > 0), None)
-    if idx_max is None:
-        return [], tasseaux
+    while tasseaux:
+        # Filtrer les tasseaux avec quantité > 0 et triez-les dans l'ordre décroissant de longueur à chaque itération
+        tasseaux = sorted([t for t in tasseaux if t[1] > 0], key=lambda x: x[0], reverse=True)
+
+        if not tasseaux:
+            break
+
+        if first_iteration:
+            max_tasseau_longueur, max_tasseau_quantite = tasseaux[0]
+            if max_tasseau_longueur <= bar_length:
+                cuts.append(max_tasseau_longueur)
+                bar_length -= max_tasseau_longueur
+                tasseaux[0] = (max_tasseau_longueur, max_tasseau_quantite - 1)
+                first_iteration = False
+                continue  # Passez à la prochaine itération de la boucle while
+
+        # Trouver le tasseau le plus grand dont la longueur est inférieure ou égale à la longueur restante de la barre
+        for idx, (longueur, quantite) in enumerate(tasseaux):
+            if longueur <= bar_length:
+                remaining_bar_length = bar_length - longueur
+                
+                # Vérifiez si un autre tasseau avec quantité > 0 peut être coupé à partir de la chute restante
+                if any(l <= remaining_bar_length and q > 0 for l, q in tasseaux):
+                    cuts.append(longueur)
+                    bar_length = remaining_bar_length
+                    tasseaux[idx] = (longueur, quantite - 1)
+                    break
+        else:
+            # Si aucun tasseau ne peut être coupé, arrêtez la boucle
+            break
+
 
     # Variables
     x = []  # x[i] sera égal au nombre de tasseaux de longueur tasseaux[i][0] utilisés
     for _, quantite in tasseaux:
         x.append(solver.IntVar(0, quantite, ""))
     
-    # Contrainte : Utilisation impérative du plus grand tasseau ayant une quantité > 0
-    solver.Add(x[idx_max] >= 1)
-
     # Contrainte : la somme des longueurs des tasseaux utilisés ne doit pas dépasser bar_length
     constraint_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux)))
     solver.Add(constraint_expr <= bar_length)
 
-    # Objectif : maximiser la somme des longueurs des tasseaux utilisés
-    solver.Maximize(constraint_expr)
-
-    if solver.Solve() != pywraplp.Solver.OPTIMAL:
-        return None, tasseaux
-
-    optimal_length = sum(tasseaux[i][0] * x[i].solution_value() for i in range(len(tasseaux)))
-
-    # Réinitialisez le solveur pour le deuxième passage
-    solver = pywraplp.Solver.CreateSolver('SCIP')
-    x = [solver.IntVar(0, quantite, "") for _, quantite in tasseaux]
-
-    # Contrainte : La somme des longueurs doit être égale à la longueur optimale
-    solver.Add(sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux))) == optimal_length)
-
-    # Contrainte : Utilisation impérative du plus grand tasseau ayant une quantité > 0
-    solver.Add(x[idx_max] >= 1)
-
-    # Nouvel objectif : maximiser la somme des (quantités de tasseaux utilisés * longueur^2)
-    objective_expr = sum(tasseaux[i][0]**2 * x[i] for i in range(len(tasseaux)))
+    # Objectif : maximiser la somme des longueurs des tasseaux utilisés, en donnant plus de poids aux tasseaux plus longs
+    penalty_per_cut = 0.1  # une petite valeur, mais assez pour faire une différence
+    objective_expr = sum(tasseaux[i][0] * x[i] for i in range(len(tasseaux))) - penalty_per_cut * sum(x[i] for i in range(len(tasseaux)))
     solver.Maximize(objective_expr)
-
-    if solver.Solve() != pywraplp.Solver.OPTIMAL:
-        return None, tasseaux
-
-    best_cuts = []
-    for i in range(len(tasseaux)):
-        best_cuts.extend([tasseaux[i][0]] * int(x[i].solution_value()))
-        tasseaux[i] = (tasseaux[i][0], tasseaux[i][1] - int(x[i].solution_value()))
-
-    return best_cuts, tasseaux
-
-
+        
+    status = solver.Solve()
+    
+    if status == pywraplp.Solver.OPTIMAL:
+        for i in range(len(tasseaux)):
+            cuts.extend([tasseaux[i][0]] * int(x[i].solution_value()))
+            tasseaux[i] = (tasseaux[i][0], tasseaux[i][1] - int(x[i].solution_value()))
+    
+    return cuts, tasseaux
 
 
 def optimize_cutting(tasseaux, bar_length):
